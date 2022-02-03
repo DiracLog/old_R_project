@@ -1,0 +1,191 @@
+---
+title: "Исследования трендов урожайности зерновых за 1970-2012 годы в Канаде"
+author: "Max Korolchuk"
+date: '24 сентября 2016 г '
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+  pdf_document:
+    keep_tex: yes
+    toc: yes
+params:
+  filename: my_data1.csv
+urlcolor: blue
+--- 
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      message = F,
+                      warning = F)
+```
+Данные были взяты отсюда  
+<http://open.canada.ca/en>[^1].
+
+[^1]: Здесь [прямая ссылка](http://open.canada.ca/data/en/dataset/fe4c98ae-5b1a-4a20-814b-545dcbd41c29) на скачивание файла.
+
+##Вступление
+ 
+```{r  , include = F }
+setwd("D:/data/data")
+df1 <- read.csv(params$filename, na.strings = "x")
+library(rmarkdown)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(data.table)
+library(ggthemes)
+library(ggvis)
+```
+
+
+Датасет состоит из `r nrow(df1) ` измерений в `r nlevels(df1$GEO)-1` регионах включая общие измерения(по всей Канаде).   Для исследование и постановки гипотезы была выбрана урожайность зерновых культур. Так же из исследования был выключен регион Newfoundland and Labrador, так как для него нет данных по нужному нам параметру. Годы наблюдений 1970-2012.
+
+##Постановка гипотезы
+
+Мы заинтересованы в следующей гипотезе:
+$\Psi_1.$ -   изменения урожайности зерновых культур в разных регионах Канады в 1970 - 2012 годах статистически значимо. 
+Для проверки оной гипотезы мы используем **R** версии `r getRversion()` и соответствующий статистический тест _t-test_ : $$t = \frac{\overline{x} - \mu_0}{s/\sqrt{n}}.$$
+
+
+## План исследования
+
+Алгоритм :
+
+1. Считать и обработать подходящий датасет
+2. Проверить гипотезу для каждого региона с помощью _t-test_ 
+3. Подкрепить выводы :
+  + таблицей с полученными результатами;
+  + графиком, иллюстрирующим результаты для всех регионов частности ;
+  + таким же графиком для Канады в общем;
+  
+##Ход исследования
+
+```{r, echo = F}
+#Для обработки даных используем пакет dplyr
+
+new_df <- df1 %>% 
+  filter(COMM == "Total crops",
+         GEO != "Newfoundland and Labrador") %>%
+  separate(Ref_Date, c("Year", "Month"), sep = "/") %>%
+  select(Year, GEO, COMM, Value)
+  
+#Преобразование фактор-переменных в числовые
+
+new_df$Value <- as.numeric(levels(new_df$Value))[new_df$Value]
+
+new_df$Year <- as.numeric(new_df$Year)
+
+```
+
+
+```{r,echo=F}
+data <- new_df[new_df$GEO !="Canada" &
+                 new_df$GEO != "British Columbia"  &
+                 new_df$GEO != "Eastern Canada"  &
+                 new_df$GEO != "Western Canada",]
+```
+
+```{r,echo=F}
+#Соберем некоторые статистики
+  short_stat <- data %>%
+    group_by(GEO) %>%
+    summarise(Mean_Prod = mean(Value, na.rm = T),
+              Lowest_Prod = min(Value, na.rm = T),
+              Highest_Prod = max(Value, na.rm = T),
+              Best_Year = Year[which.max(Value)],
+              Worst_Year = Year[which.min(Value)])
+```
+
+```{r,echo=F}
+
+hypothe <- data%>%
+  group_by(GEO) %>%
+  do({
+    res <- t.test(.$Value, mu = 0, conf.level = 0.99)
+    data.frame(Pvalue = res$p.value,
+               Confiden_level = res$conf.int[2])
+  })
+```
+
+#### **Таблица с результатами**:
+
+```{r,echo=F}
+left_join(hypothe,short_stat, by = "GEO") %>%
+      knitr::kable(caption = "Описательные статистики и доверительные интервалы  ",
+                   digits = c(2,2,2,2,2))
+```
+
+
+## Графики
+
+>График №1
+```{r, echo  = F}
+  ggvis(data, ~Year, ~ Value, stroke = ~GEO) %>%
+  layer_lines() %>%
+   add_axis("x", title = "Год", values = seq(1970,2010,10)) %>%
+  add_axis("y", title = "Урожайность", values = seq(50,300,70))
+```
+
+
+
+>График №2
+
+```{r,echo = F}
+p <- ggplot(data, aes(Year,Value))+
+      geom_line(col = "Yellow")+
+      geom_hline(data = short_stat, aes(yintercept = Mean_Prod), color = "red", linetype = "dashed")+
+      facet_wrap(~GEO,ncol = 2)+
+      theme_dark() +scale_fill_brewer(direction = -1)+
+      scale_x_continuous(name = "Год",
+                         breaks = seq(1970,2010,20))
+    
+    p <- p+scale_y_continuous(name = "Урожайность", 
+                         breaks = seq(15,300,80))+
+      ggtitle("Урожайность зерновых в разных регионах Канады")
+      show(p)
+```
+
+>График 3
+
+```{r, echo = F}
+ t <-  ggplot(new_df[new_df$GEO == "Canada",], 
+                 aes(Year, Value))+
+      geom_point(size = 1, color = "black")+
+      geom_smooth()+
+      theme_solarized() +
+      scale_colour_solarized("red")+
+      ggtitle("Урожайность зерновых Канады в общем")
+    t <- t+scale_x_continuous(name = "Год")+
+      scale_y_continuous(name = "Урожайность",
+                         breaks = seq(20,160,20))
+show(t)
+```
+
+
+>Вывод
+
+
+
+  Наш анализ доказал гипотезу что $\Psi_1.$ -   изменения урожайности зерновых культур в разных регионах Канады в 1970 - 2012 годах статистически значимо.
+  Действительно, p-значения , полученные с помощью _t-test_ значительно меньще чем граница принятия нулевой гипотезы , а именно равна нулю, для всех исследуемых регионов. 
+  Следовательно, мы можем сделать вывод, что сельское хозяйство канады технологично развивается, и с каждым годом, приносит все больший урожай, как минимум для зерновых, что и было доказано в оном тесте.
+  
+  
+  
+
+
+
+
+    
+
+
+
+
+
+
+
+ 
+ 
